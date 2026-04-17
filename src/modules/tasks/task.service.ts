@@ -22,3 +22,9 @@ export async function deleteTask(id: string, userId: string) {
     where: { id, userId },
   });
 }
+
+export async function getTask(id: string, userId: string) {
+  return prisma.task.findFirst({
+    where: { id, userId },
+  });
+}

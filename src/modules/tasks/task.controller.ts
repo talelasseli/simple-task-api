@@ -21,3 +21,11 @@ export async function deleteTask(req: AuthRequest, res: Response) {
   await service.deleteTask(req.params.id, req.userId!);
   res.json({ message: "Deleted" });
 }
+
+export async function getTask(req: AuthRequest, res: Response) {
+  const task = await service.getTask(req.params.id, req.userId!);
+  if (!task) {
+    return res.status(404).json({ message: "Not found" });
+  }
+  res.json(task);
+}
