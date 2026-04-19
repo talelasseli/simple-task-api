@@ -7,11 +7,12 @@ datasource db {
 }
 
 model User {
-  id        String   @id @default(uuid())
-  email     String   @unique
-  password  String
-  tasks     Task[]
-  createdAt DateTime @default(now())
+  id              String           @id @default(uuid())
+  email           String           @unique
+  password        String
+  tasks           Task[]
+  refreshSessions RefreshSession[]
+  createdAt       DateTime         @default(now())
 }
 
 model Task {
@@ -23,4 +24,17 @@ model Task {
   user   User   @relation(fields: [userId], references: [id])
 
   createdAt DateTime @default(now())
+}
+
+model RefreshSession {
+  id        String   @id
+  tokenHash String   @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime @default(now())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
 }

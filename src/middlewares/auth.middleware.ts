@@ -1,7 +1,6 @@
 import { Request, Response, NextFunction } from "express";
-import jwt from "jsonwebtoken";
-
-const JWT_SECRET = "supersecret";
+import { AppError } from "../errors/app-error";
+import { verifyAccessToken } from "../utils/jwt";
 
 export interface AuthRequest extends Request {
   userId?: string;
@@ -9,20 +8,28 @@ export interface AuthRequest extends Request {
 
 export function authMiddleware(
   req: AuthRequest,
-  res: Response,
+  _res: Response,
   next: NextFunction,
 ) {
   const authHeader = req.headers.authorization;
 
-  if (!authHeader) return res.status(401).json({ error: "No token provided" });
+  if (!authHeader) {
+    next(new AppError(401, "Missing bearer token"));
+    return;
+  }
 
-  const token = authHeader.split(" ")[1];
+  const [scheme, token] = authHeader.split(" ");
+
+  if (scheme !== "Bearer" || !token) {
+    next(new AppError(401, "Malformed bearer token"));
+    return;
+  }
 
   try {
-    const payload = jwt.verify(token, JWT_SECRET) as { userId: string };
+    const payload = verifyAccessToken(token);
     req.userId = payload.userId;
     next();
   } catch {
-    return res.status(401).json({ error: "Invalid token" });
+    next(new AppError(401, "Invalid token"));
   }
 }
