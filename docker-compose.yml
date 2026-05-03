@@ -23,6 +23,7 @@ services:
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
       PORT: 3000
       NODE_ENV: production
+      CORS_ORIGIN: http://localhost:5173
 
   nginx:
     image: nginx:alpine

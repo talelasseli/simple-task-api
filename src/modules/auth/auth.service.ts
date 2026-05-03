@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client";
 import { hashPassword, comparePasswords } from "../../utils/hash";
 import { prisma } from "../../config/prisma";
 import { AppError } from "../../errors/app-error";
+import { logInfo, logWarn } from "../../utils/log";
 import {
   createAccessToken,
   createRefreshToken,
@@ -34,6 +35,8 @@ async function createSession(user: { id: string }) {
   const sessionId = crypto.randomUUID();
   const refreshToken = createRefreshToken(user.id, sessionId);
 
+  logInfo("Creating refresh session", { userId: user.id, sessionId });
+
   await prisma.refreshSession.create({
     data: {
       id: sessionId,
@@ -42,6 +45,8 @@ async function createSession(user: { id: string }) {
       expiresAt: getRefreshExpiryDate(),
     },
   });
+
+  logInfo("Refresh session created", { userId: user.id, sessionId });
 
   return refreshToken;
 }
@@ -61,6 +66,7 @@ async function issueTokens(user: {
 }
 
 export async function registerUser({ email, password }: RegisterInput) {
+  logInfo("Register service started", { email });
   const hashedPassword = await hashPassword(password);
 
   try {
@@ -73,12 +79,14 @@ export async function registerUser({ email, password }: RegisterInput) {
       },
     });
 
+    logInfo("User created", { userId: user.id, email: user.email });
     return issueTokens(user);
   } catch (error) {
     if (
       error instanceof Prisma.PrismaClientKnownRequestError &&
       error.code === "P2002"
     ) {
+      logWarn("Register service rejected duplicate email", { email });
       throw new AppError(409, "Email is already registered");
     }
 
@@ -87,6 +95,7 @@ export async function registerUser({ email, password }: RegisterInput) {
 }
 
 export async function loginUser({ email, password }: LoginInput) {
+  logInfo("Login service started", { email });
   const user = await prisma.user.findUnique({
     where: { email },
     select: {
@@ -98,20 +107,26 @@ export async function loginUser({ email, password }: LoginInput) {
   });
 
   if (!user) {
+    logWarn("Login service rejected unknown email", { email });
     throw new AppError(401, INVALID_CREDENTIALS_MESSAGE);
   }
 
   const validPassword = await comparePasswords(password, user.password);
 
   if (!validPassword) {
+    logWarn("Login service rejected invalid password", { userId: user.id, email });
     throw new AppError(401, INVALID_CREDENTIALS_MESSAGE);
   }
 
+  logInfo("Login service authenticated user", { userId: user.id, email });
   return issueTokens(user);
 }
 
 export async function refreshUserSession(refreshToken: string | undefined) {
+  logInfo("Refresh service started", { hasRefreshToken: Boolean(refreshToken) });
+
   if (!refreshToken) {
+    logWarn("Refresh service rejected missing token");
     throw new AppError(401, INVALID_REFRESH_MESSAGE);
   }
 
@@ -120,8 +135,14 @@ export async function refreshUserSession(refreshToken: string | undefined) {
   try {
     payload = verifyRefreshToken(refreshToken);
   } catch {
+    logWarn("Refresh service rejected unverifiable token");
     throw new AppError(401, INVALID_REFRESH_MESSAGE);
   }
+
+  logInfo("Refresh token verified", {
+    userId: payload.userId,
+    sessionId: payload.sessionId,
+  });
 
   const session = await prisma.refreshSession.findUnique({
     where: { id: payload.sessionId },
@@ -134,10 +155,23 @@ export async function refreshUserSession(refreshToken: string | undefined) {
     session.expiresAt <= new Date() ||
     session.tokenHash !== hashRefreshToken(refreshToken)
   ) {
+    logWarn("Refresh service rejected invalid session", {
+      userId: payload.userId,
+      sessionId: payload.sessionId,
+      sessionFound: Boolean(session),
+      revoked: Boolean(session?.revokedAt),
+      expired: session ? session.expiresAt <= new Date() : undefined,
+      userMismatch: session ? session.userId !== payload.userId : undefined,
+    });
     throw new AppError(401, INVALID_REFRESH_MESSAGE);
   }
 
   const nextRefreshToken = createRefreshToken(payload.userId, session.id);
+
+  logInfo("Rotating refresh session", {
+    userId: payload.userId,
+    sessionId: session.id,
+  });
 
   await prisma.refreshSession.update({
     where: { id: session.id },
@@ -147,6 +181,11 @@ export async function refreshUserSession(refreshToken: string | undefined) {
     },
   });
 
+  logInfo("Refresh session rotated", {
+    userId: payload.userId,
+    sessionId: session.id,
+  });
+
   return {
     accessToken: createAccessToken(payload.userId),
     refreshToken: nextRefreshToken,
@@ -154,7 +193,10 @@ export async function refreshUserSession(refreshToken: string | undefined) {
 }
 
 export async function logoutUserSession(refreshToken: string | undefined) {
+  logInfo("Logout service started", { hasRefreshToken: Boolean(refreshToken) });
+
   if (!refreshToken) {
+    logInfo("Logout service skipped: missing token");
     return;
   }
 
@@ -163,10 +205,16 @@ export async function logoutUserSession(refreshToken: string | undefined) {
   try {
     payload = verifyRefreshToken(refreshToken);
   } catch {
+    logWarn("Logout service skipped: unverifiable token");
     return;
   }
 
-  await prisma.refreshSession.updateMany({
+  logInfo("Revoking refresh session", {
+    userId: payload.userId,
+    sessionId: payload.sessionId,
+  });
+
+  const result = await prisma.refreshSession.updateMany({
     where: {
       id: payload.sessionId,
       userId: payload.userId,
@@ -176,6 +224,12 @@ export async function logoutUserSession(refreshToken: string | undefined) {
     data: {
       revokedAt: new Date(),
     },
+  });
+
+  logInfo("Refresh session revoke completed", {
+    userId: payload.userId,
+    sessionId: payload.sessionId,
+    revokedCount: result.count,
   });
 }
 

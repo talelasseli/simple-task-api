@@ -1,6 +1,7 @@
 import type { RequestHandler } from "express";
 import type { ZodType } from "zod";
 import { AppError } from "../errors/app-error";
+import { logWarn } from "../utils/log";
 
 type RequestField = "body" | "params" | "query";
 
@@ -16,7 +17,16 @@ function validate<T>(schema: ZodType<T>, field: RequestField): RequestHandler {
     const result = schema.safeParse(req[field]);
 
     if (!result.success) {
-      next(new AppError(400, `Invalid request ${field}`, formatIssues(result.error.issues)));
+      const details = formatIssues(result.error.issues);
+
+      logWarn("Request validation failed", {
+        method: req.method,
+        path: req.originalUrl,
+        field,
+        details,
+      });
+
+      next(new AppError(400, `Invalid request ${field}`, details));
       return;
     }
 
