@@ -9,6 +9,10 @@ export type AuthResponse = {
   user: User;
 };
 
+export type RefreshResponse = {
+  accessToken: string;
+};
+
 export type Task = {
   id: string;
   title: string;

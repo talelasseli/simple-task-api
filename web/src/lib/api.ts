@@ -1,4 +1,5 @@
-import type { ApiErrorBody, AuthResponse, Task } from "../types/api";
+import type { ApiErrorBody, AuthResponse, RefreshResponse, Task } from "../types/api";
+import { logError, logInfo, logWarn } from "./logger";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "https://localhost";
 
@@ -26,6 +27,9 @@ async function parseJson<T>(response: Response) {
 
 async function request<T>(path: string, options: RequestOptions = {}) {
   const headers = new Headers(options.headers);
+  const method = options.method ?? "GET";
+  const url = `${API_BASE_URL}${path}`;
+  const startedAt = performance.now();
 
   if (options.body && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
@@ -35,11 +39,35 @@ async function request<T>(path: string, options: RequestOptions = {}) {
     headers.set("Authorization", `Bearer ${options.accessToken}`);
   }
 
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    ...options,
-    credentials: "include",
-    headers,
+  logInfo("API request started", {
+    method,
+    path,
+    url,
+    hasBody: Boolean(options.body),
+    hasAccessToken: Boolean(options.accessToken),
   });
+
+  let response: Response;
+
+  try {
+    response = await fetch(url, {
+      ...options,
+      credentials: "include",
+      headers,
+    });
+  } catch (error) {
+    logError("API request failed before response", {
+      method,
+      path,
+      url,
+      durationMs: Math.round(performance.now() - startedAt),
+      error,
+    });
+
+    throw error;
+  }
+
+  const durationMs = Math.round(performance.now() - startedAt);
 
   if (!response.ok) {
     let message = "Something went wrong";
@@ -51,8 +79,26 @@ async function request<T>(path: string, options: RequestOptions = {}) {
       message = response.statusText || message;
     }
 
+    logWarn("API response failed", {
+      method,
+      path,
+      url,
+      status: response.status,
+      statusText: response.statusText,
+      durationMs,
+      message,
+    });
+
     throw new ApiError(response.status, message);
   }
+
+  logInfo("API response succeeded", {
+    method,
+    path,
+    url,
+    status: response.status,
+    durationMs,
+  });
 
   return parseJson<T>(response);
 }
@@ -69,6 +115,10 @@ export function loginUser(email: string, password: string) {
     body: JSON.stringify({ email, password }),
     method: "POST",
   });
+}
+
+export function refreshUserSession() {
+  return request<RefreshResponse>("/auth/refresh", { method: "POST" });
 }
 
 export function logoutUser() {

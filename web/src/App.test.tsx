@@ -1,6 +1,6 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import type { AuthResponse, Task } from "./types/api";
 
@@ -10,6 +10,7 @@ const apiMocks = vi.hoisted(() => ({
   getTasks: vi.fn(),
   loginUser: vi.fn(),
   logoutUser: vi.fn(),
+  refreshUserSession: vi.fn(),
   registerUser: vi.fn(),
   updateTask: vi.fn(),
 }));
@@ -42,6 +43,10 @@ function storeSession() {
 }
 
 describe("App", () => {
+  beforeEach(() => {
+    apiMocks.refreshUserSession.mockResolvedValue({ accessToken: session.accessToken });
+  });
+
   afterEach(() => {
     localStorage.clear();
     vi.clearAllMocks();
@@ -96,5 +101,41 @@ describe("App", () => {
       expect(screen.queryByText("Build the frontend")).not.toBeInTheDocument();
     });
     expect(apiMocks.deleteTask).toHaveBeenCalledWith("access-token", task.id);
+  });
+
+  it("refreshes a stored session when the app loads", async () => {
+    storeSession();
+    apiMocks.refreshUserSession.mockResolvedValue({ accessToken: "next-access-token" });
+    apiMocks.getTasks.mockResolvedValue([]);
+    setRoute("/tasks");
+
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "Your tasks" })).toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(apiMocks.refreshUserSession).toHaveBeenCalled();
+    });
+
+    const storedSession = JSON.parse(
+      localStorage.getItem("task-tracker-session") ?? "{}",
+    ) as AuthResponse;
+
+    expect(storedSession.accessToken).toBe("next-access-token");
+  });
+
+  it("clears a stored session when refresh fails", async () => {
+    storeSession();
+    apiMocks.refreshUserSession.mockRejectedValue(new Error("Invalid refresh token"));
+    apiMocks.getTasks.mockResolvedValue([]);
+    setRoute("/tasks");
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(apiMocks.refreshUserSession).toHaveBeenCalled();
+      expect(screen.getByRole("heading", { name: "Log in" })).toBeInTheDocument();
+    });
+    expect(localStorage.getItem("task-tracker-session")).toBeNull();
   });
 });

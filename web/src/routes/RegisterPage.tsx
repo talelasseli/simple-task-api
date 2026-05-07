@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Navigate, useNavigate } from "react-router";
 import AuthForm from "../components/AuthForm";
 import { useAuth } from "../context/useAuth";
+import { logError, logInfo } from "../lib/logger";
 
 export default function RegisterPage() {
   const { isAuthenticated, register } = useAuth();
@@ -13,12 +14,15 @@ export default function RegisterPage() {
   }
 
   async function handleRegister(email: string, password: string) {
+    logInfo("Register form submitted", { email });
     setError(null);
 
     try {
       await register(email, password);
+      logInfo("Register form succeeded", { email });
       navigate("/tasks");
     } catch (caughtError) {
+      logError("Register form failed", { email, error: caughtError });
       setError(caughtError instanceof Error ? caughtError.message : "Unable to create account");
     }
   }
